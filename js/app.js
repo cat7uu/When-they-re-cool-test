@@ -63,6 +63,10 @@
   function cleanTitle(t) {
     return String(t || "")
       .replace(/\s+([,.;:!?%])/g, "$1")
+      .replace(/(\d) - (?=[\p{L}\d])/gu, "$1-") // GDELT spaces out hyphens: "31 - Year - Old"
+      .replace(/([\p{L}\d]) - (?=\p{Ll})/gu, "$1-") // "ex - strongman"
+      .replace(/(-[\p{L}\d]+) - (?=[\p{L}\d])/gu, "$1-") // continue a chain: "31-Year - Old"
+      .replace(/(-[\p{L}\d]+) - (?=[\p{L}\d])/gu, "$1-")
       .replace(/\s+'\s*s\b/g, "'s")
       .replace(/\s{2,}/g, " ")
       .trim();
@@ -163,14 +167,15 @@
       lon: place.lon,
       precise: place.precise,
       demo: !!a.demo,
+      src: a.sourcecountry || "",
     };
   }
 
-  async function fetchJSON(url, ms = 15000) {
+  async function fetchJSON(url, ms = 45000) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), ms);
     try {
-      const res = await fetch(url, { signal: ctl.signal });
+      const res = await fetch(url, { signal: ctl.signal, cache: "no-cache" });
       if (!res.ok) throw new Error("HTTP " + res.status);
       const text = await res.text();
       return JSON.parse(text); // GDELT sends plain-text errors, which throw here
@@ -216,6 +221,12 @@
       added++;
     }
     state.stories.sort((a, b) => b.time - a.time);
+    const cutoff = Date.now() - 26 * 60 * 60 * 1000;
+    if (state.stories.some((s) => s.time < cutoff)) {
+      state.stories = state.stories.filter((s) => s.time >= cutoff);
+      seen.clear();
+      for (const s of state.stories) seen.add(keyOf(s.title));
+    }
     return added;
   }
 
@@ -244,19 +255,83 @@
     }));
   }
 
+  // GDELT is often slow (10-20 s) and turns away requests that come too close
+  // together, so retry once after a pause.
+  async function fetchGdelt(query) {
+    try {
+      return await fetchJSON(gdeltUrl(query));
+    } catch (err) {
+      if (err.name === "AbortError") throw err;
+      await sleep(8000);
+      return fetchJSON(gdeltUrl(query));
+    }
+  }
+
+  // A copy of recent headlines saved every 30 minutes by a GitHub Action
+  // (.github/workflows/headlines.yml) on the repo's "data" branch. It loads
+  // instantly, so the map isn't empty while GDELT is slow.
+  function snapshotUrl() {
+    const meta = document.querySelector('meta[name="headlines-snapshot"]');
+    if (meta && meta.content) return meta.content;
+    const m = /^([\w-]+)\.github\.io$/i.exec(location.hostname);
+    if (!m) return null;
+    const first = location.pathname.split("/").filter(Boolean)[0];
+    const repo = first && !first.includes(".") ? first : m[1] + ".github.io";
+    return `https://raw.githubusercontent.com/${m[1]}/${repo}/data/headlines.json`;
+  }
+  async function loadSnapshot() {
+    const url = snapshotUrl();
+    if (!url) return null;
+    try {
+      const snap = await fetchJSON(url, 10000);
+      return snap && snap.articles && snap.articles.length ? snap : null;
+    } catch (err) {
+      console.warn("Saved headlines unavailable:", err);
+      return null;
+    }
+  }
+
+  function showDemo() {
+    addArticles(demoArticles());
+    state.source = "demo";
+    state.updated = new Date();
+    renderAll();
+  }
+
   let loading = false;
   async function load() {
     if (loading) return;
     loading = true;
     setStatus("loading");
+    const firstLoad = !state.stories.length;
+
+    // 1. Show something quickly: the saved snapshot, else this browser's cache.
+    const snap = await loadSnapshot();
+    if (snap && Date.now() - snap.at < CACHE_MAX_AGE) {
+      if (state.source !== "live") resetStories();
+      addArticles(snap.articles);
+      if (state.source !== "live" || snap.at > state.updated) state.updated = new Date(snap.at);
+      state.source = "live";
+      renderAll();
+    } else if (firstLoad) {
+      const cache = loadCache();
+      if (cache) {
+        addArticles(cache.articles);
+        state.source = "cache";
+        state.updated = new Date(cache.at);
+        renderAll();
+      }
+    }
+    setStatus("loading");
+
+    // 2. Then ask GDELT for the very latest.
     const raw = [];
-    let liveOk = false;
     for (let i = 0; i < QUERIES.length; i++) {
-      if (i > 0) await sleep(5500); // GDELT allows one request every 5 seconds
+      if (i > 0) await sleep(6000);
       try {
-        const data = await fetchJSON(gdeltUrl(QUERIES[i]));
+        const data = await fetchGdelt(QUERIES[i]);
         const arts = (data.articles || []).filter((a) => !a.language || a.language === "English");
-        if (!liveOk) { resetStories(); liveOk = true; }
+        if (state.source !== "live") resetStories();
         raw.push(...arts);
         addArticles(arts);
         state.source = "live";
@@ -264,24 +339,15 @@
         renderAll();
       } catch (err) {
         console.warn("News request failed:", err);
+        if (!state.stories.length) showDemo();
       }
     }
-    if (liveOk) {
-      saveCache(raw.map((a) => ({ title: a.title, url: a.url, domain: a.domain, seendate: a.seendate, socialimage: a.socialimage, sourcecountry: a.sourcecountry })));
-    } else if (!state.stories.length || state.source !== "live") {
-      const cache = loadCache();
-      resetStories();
-      if (cache) {
-        addArticles(cache.articles);
-        state.source = "cache";
-        state.updated = new Date(cache.at);
-      } else {
-        addArticles(demoArticles());
-        state.source = "demo";
-        state.updated = new Date();
-      }
-      renderAll();
+
+    if (raw.length || snap) {
+      const keep = state.stories.slice(0, 600);
+      saveCache(keep.map((s) => ({ title: s.title, url: s.url, domain: s.domain, time: s.time.getTime(), socialimage: s.image, sourcecountry: s.src })));
     }
+    if (!state.stories.length) showDemo();
     loading = false;
     setStatus();
   }
@@ -646,7 +712,9 @@
     for (const o of nearby) {
       const b = el("button", { type: "button", style: `--c:${CAT_BY_ID[o.cat].color}` }, o.title);
       b.addEventListener("click", () => select(o));
-      list.append(el("li")).append(b);
+      const li = el("li");
+      li.append(b);
+      list.append(li);
     }
 
     const vis = visibleStories();
@@ -722,7 +790,7 @@
     const banner = $("#banner");
     if (mode === "loading" && !state.stories.length) {
       st.dataset.mode = "loading";
-      text.textContent = "Gathering headlines…";
+      text.textContent = "Gathering headlines… this can take up to 30 seconds";
       return;
     }
     st.dataset.mode = state.source;
