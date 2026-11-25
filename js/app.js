@@ -153,7 +153,9 @@
   function toStory(a) {
     const title = cleanTitle(a.title);
     if (title.length < 12) return null;
-    const place = geo.locate(title) || geo.country(a.sourcecountry);
+    // Look for a place in the headline, then in the summary (RSS feeds have one),
+    // and finally fall back to the outlet's country.
+    const place = geo.locate(title) || (a.summary && geo.locate(a.summary)) || geo.country(a.sourcecountry);
     if (!place) return null;
     return {
       title,
