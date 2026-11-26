@@ -494,9 +494,10 @@
     const defs = svgEl("defs");
     // ocean deepens towards the edges; land is lit slightly from the north
     const ocean = svgEl("radialGradient", { id: "ocean-grad", gradientUnits: "userSpaceOnUse", cx: "500", cy: "190", r: "560" });
-    ocean.append(svgEl("stop", { offset: "0", "stop-color": "#13213f" }), svgEl("stop", { offset: "0.6", "stop-color": "#0d1830" }), svgEl("stop", { offset: "1", "stop-color": "#081022" }));
+    // stop colours come from the theme (see --ocean-* and --land-* in styles.css)
+    ocean.append(svgEl("stop", { offset: "0", class: "ocean-0" }), svgEl("stop", { offset: "0.6", class: "ocean-1" }), svgEl("stop", { offset: "1", class: "ocean-2" }));
     const ground = svgEl("linearGradient", { id: "land-grad", gradientUnits: "userSpaceOnUse", x1: "0", y1: "0", x2: "0", y2: "435" });
-    ground.append(svgEl("stop", { offset: "0", "stop-color": "#2a3755" }), svgEl("stop", { offset: "0.5", "stop-color": "#222e4a" }), svgEl("stop", { offset: "1", "stop-color": "#1d2741" }));
+    ground.append(svgEl("stop", { offset: "0", class: "land-0" }), svgEl("stop", { offset: "0.5", class: "land-1" }), svgEl("stop", { offset: "1", class: "land-2" }));
     defs.append(ocean, ground);
     svg.append(defs);
   })();
@@ -533,7 +534,7 @@
     ctx.scale(scale, scale);
     ctx.clip(new Path2D(sphereD)); // keep the shadow inside the globe outline
     if ("filter" in ctx) ctx.filter = "blur(5px)"; // soft dusk edge where supported
-    ctx.fillStyle = "rgba(2, 6, 20, 0.42)";
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--night").trim() || "rgba(2, 6, 20, 0.42)";
     ctx.beginPath();
     pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
     ctx.closePath();
@@ -1311,6 +1312,7 @@
   buildLabels();
   drawNight();
   setInterval(drawNight, 60 * 1000);
+  document.addEventListener("themechange", drawNight); // night is lighter on the light map
   fit();
   load();
   setInterval(load, REFRESH_MS);
