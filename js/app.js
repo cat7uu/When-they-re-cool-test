@@ -170,6 +170,7 @@
       precise: place.precise,
       demo: !!a.demo,
       src: a.sourcecountry || "",
+      summary: a.summary || "",
     };
   }
 
@@ -272,14 +273,20 @@
   // A copy of recent headlines saved every 30 minutes by a GitHub Action
   // (.github/workflows/headlines.yml) on the repo's "data" branch. It loads
   // instantly, so the map isn't empty while GDELT is slow.
-  function snapshotUrl() {
-    const meta = document.querySelector('meta[name="headlines-snapshot"]');
-    if (meta && meta.content) return meta.content;
+  // Where the saved files live: the repo's "data" branch on GitHub. A
+  // <meta name="data-base"> tag can point somewhere else (e.g. for testing).
+  function dataBase() {
+    const meta = document.querySelector('meta[name="data-base"]');
+    if (meta && meta.content) return meta.content.replace(/\/?$/, "/");
     const m = /^([\w-]+)\.github\.io$/i.exec(location.hostname);
     if (!m) return null;
     const first = location.pathname.split("/").filter(Boolean)[0];
     const repo = first && !first.includes(".") ? first : m[1] + ".github.io";
-    return `https://raw.githubusercontent.com/${m[1]}/${repo}/data/headlines.json`;
+    return `https://raw.githubusercontent.com/${m[1]}/${repo}/data/`;
+  }
+  function snapshotUrl() {
+    const base = dataBase();
+    return base && base + "headlines.json";
   }
   async function loadSnapshot() {
     const url = snapshotUrl();
@@ -807,7 +814,9 @@
         : "Couldn't reach the live news feed, so these are made-up sample headlines to show how the map works.";
   }
 
+  const storyListeners = [];
   function renderAll() {
+    storyListeners.forEach((fn) => fn());
     const keep = state.selected;
     renderDots();
     renderFilters();
@@ -820,6 +829,15 @@
   $("#banner-retry").addEventListener("click", () => load());
 
   // ---------------------------------------------------------------- boot
+  // shared with js/stocks.js
+  window.Earthwire = {
+    dataBase,
+    fetchJSON,
+    timeAgo,
+    stories: () => state.stories,
+    onStories: (fn) => storyListeners.push(fn),
+  };
+
   new ResizeObserver(() => fit()).observe(wrap);
   fit();
   load();
