@@ -62,6 +62,19 @@
     mascot.setAttribute("aria-expanded", "false");
   }
 
+  // Blink every few seconds by switching a class briefly, rather than running
+  // a never-ending animation that redraws her on every frame.
+  setInterval(() => {
+    if (document.hidden) return;
+    mascot.classList.add("blink");
+    setTimeout(() => mascot.classList.remove("blink"), 160);
+  }, 4600);
+
+  // the hop/shake replace the idle float for a moment; afterwards, float again
+  mascot.addEventListener("animationend", (e) => {
+    if (e.animationName === "hop" || e.animationName === "shake") mascot.classList.remove("hop", "shake");
+  });
+
   let taps = 0;
   mascot.addEventListener("click", () => {
     taps++;

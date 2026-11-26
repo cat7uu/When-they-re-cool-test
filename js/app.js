@@ -253,7 +253,16 @@
     selected: null,
     source: "loading", // live | cache | demo
     updated: null,
+    terms: [], // search words, lowercased
   };
+
+  // A story is shown when its topic is switched on and it matches the search.
+  function matchesSearch(s) {
+    if (!state.terms.length) return true;
+    if (!s._hay) s._hay = [s.title, s.place, s.domain, ICON_BY_ID[s.icon].label, CAT_BY_ID[s.cat].label].join(" ").toLowerCase();
+    return state.terms.every((t) => s._hay.includes(t));
+  }
+  const isShown = (s) => state.active.has(s.cat) && matchesSearch(s);
   const seen = new Set();
   const keyOf = (t) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "").slice(0, 70);
 
@@ -408,8 +417,16 @@
   }
 
   // ---------------------------------------------------------------- map
+  // Two layers: the base map (countries, night, names) is one SVG that the
+  // browser slides and scales on the graphics card while you pan or zoom, and
+  // is only redrawn once the map settles. Markers live in a separate SVG, so
+  // pulsing icons don't make the whole map redraw.
   const svg = $("#map");
+  const msvg = $("#markers");
   const wrap = $("#map-wrap");
+  // Pulsing rings are plain HTML elements above the markers: the graphics card
+  // animates them without repainting anything, unlike rings inside the SVG.
+  const pulseLayer = el("div", { class: "pulses", "aria-hidden": "true" });
   const world = svgEl("g", { class: "world" });
   const graticule = svgEl("g", { class: "graticule" });
   const land = svgEl("g", { class: "land" });
@@ -417,7 +434,12 @@
   const night = svgEl("g", { class: "night" });
   const labels = svgEl("g", { class: "labels" });
   world.append(graticule, land, night, labels);
-  svg.append(world, dotsLayer);
+  svg.setAttribute("width", W.w);
+  svg.setAttribute("height", W.h);
+  svg.setAttribute("viewBox", `0 0 ${W.w} ${W.h}`);
+  svg.append(world);
+  msvg.append(dotsLayer);
+  msvg.after(pulseLayer);
 
   // icon symbols, used by every marker and by the story panel
   (function defineIcons() {
@@ -431,16 +453,18 @@
       sym.querySelectorAll(".f").forEach((n) => { n.setAttribute("fill", "currentColor"); n.setAttribute("stroke", "none"); });
       defs.append(sym);
     }
-    svg.prepend(defs);
+    msvg.prepend(defs);
   })();
 
+  let sphereD = "";
   // sphere outline + graticule
   (function drawBase() {
     const line = (pts) => "M" + pts.map((p) => p.map((v) => v.toFixed(1)).join(",")).join("L");
     const outline = [];
     for (let lat = -57; lat <= 84; lat += 1) outline.push(project(lat, 180));
     for (let lat = 84; lat >= -57; lat -= 1) outline.push(project(lat, -180));
-    graticule.append(svgEl("path", { class: "sphere", d: line(outline) + "Z" }));
+    sphereD = line(outline) + "Z";
+    graticule.append(svgEl("path", { class: "sphere", d: sphereD }));
     const clip = svgEl("clipPath", { id: "sphere-clip" });
     clip.append(svgEl("path", { d: line(outline) + "Z" }));
     graticule.append(clip);
@@ -468,9 +492,6 @@
   // position comes from the date and time (good to within about a degree).
   (function () {
     const defs = svgEl("defs");
-    const blur = svgEl("filter", { id: "night-blur", x: "-5%", y: "-5%", width: "110%", height: "110%" });
-    blur.append(svgEl("feGaussianBlur", { stdDeviation: "5" }));
-    defs.append(blur);
     // ocean deepens towards the edges; land is lit slightly from the north
     const ocean = svgEl("radialGradient", { id: "ocean-grad", gradientUnits: "userSpaceOnUse", cx: "500", cy: "190", r: "560" });
     ocean.append(svgEl("stop", { offset: "0", "stop-color": "#13213f" }), svgEl("stop", { offset: "0.6", "stop-color": "#0d1830" }), svgEl("stop", { offset: "1", "stop-color": "#081022" }));
@@ -479,8 +500,10 @@
     defs.append(ocean, ground);
     svg.append(defs);
   })();
-  const nightPath = svgEl("path", { class: "night-shade", filter: "url(#night-blur)" });
-  night.append(nightPath);
+  // Drawn once a minute onto a canvas and shown as an image: a live blur
+  // filter would have to be recalculated on every frame of a pan or zoom.
+  const nightImg = svgEl("image", { x: 0, y: 0, width: W.w, height: W.h, preserveAspectRatio: "none" });
+  night.append(nightImg);
   function drawNight() {
     const now = new Date();
     const start = Date.UTC(now.getUTCFullYear(), 0, 0);
@@ -501,8 +524,21 @@
     }
     const pole = decl > 0 ? -57 : 84; // the pole tilted away from the sun is in darkness
     for (let lon = 180; lon >= -180; lon -= 4) pts.push(project(pole, lon));
-    nightPath.setAttribute("d", "M" + pts.map((p) => p[0].toFixed(1) + "," + p[1].toFixed(1)).join("L") + "Z");
-    nightPath.setAttribute("clip-path", "url(#sphere-clip)");
+    const scale = 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = W.w * scale;
+    canvas.height = W.h * scale;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.scale(scale, scale);
+    ctx.clip(new Path2D(sphereD)); // keep the shadow inside the globe outline
+    if ("filter" in ctx) ctx.filter = "blur(5px)"; // soft dusk edge where supported
+    ctx.fillStyle = "rgba(2, 6, 20, 0.42)";
+    ctx.beginPath();
+    pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.closePath();
+    ctx.fill();
+    nightImg.setAttribute("href", canvas.toDataURL("image/png"));
   }
 
   // ---------------------------------------------------------------- country names
@@ -547,6 +583,9 @@
     const fs = 9.5 / view.k;
     labels.setAttribute("font-size", fs.toFixed(3));
     labels.setAttribute("stroke-width", (3 / view.k).toFixed(3));
+    // borders and outlines stay the same thickness on screen at every zoom
+    land.setAttribute("stroke-width", (0.6 / view.k).toFixed(4));
+    graticule.setAttribute("stroke-width", (0.9 / view.k).toFixed(4));
     for (const l of countryLabels) {
       // show a name only where the country is wide enough on screen to hold it
       l.t.style.display = l.w * view.k > l.len * 7.2 + 10 ? "" : "none";
@@ -561,7 +600,7 @@
     const prev = { ...view };
     view.w = r.width;
     view.h = r.height;
-    svg.setAttribute("viewBox", `0 0 ${view.w} ${view.h}`);
+    msvg.setAttribute("viewBox", `0 0 ${view.w} ${view.h}`);
     view.k0 = Math.min(view.w / MAP_W, view.h / MAP_H) * 0.98;
     if (!prev.w) {
       // on tall, narrow screens start a little zoomed in so the map fills the frame
@@ -638,7 +677,8 @@
   // "+N" badge; zooming in reveals the rest.
   let lastLimit = -1;
   function updateCrowding() {
-    const limit = Math.max(4, Math.floor(4 * Math.pow(view.k / view.k0, 2)));
+    // while searching, show every match instead of grouping them behind a badge
+    const limit = state.terms.length ? Infinity : Math.max(4, Math.floor(4 * Math.pow(view.k / view.k0, 2)));
     if (limit === lastLimit) return;
     lastLimit = limit;
     for (const s of state.stories) {
@@ -652,16 +692,57 @@
     }
   }
 
+  // While the map moves, the base layer is a GPU-scaled picture (blurry for a
+  // moment when zooming); 150 ms after it stops it is redrawn sharp.
+  let settleTimer = null;
+  let moving = false;
+  function settle() {
+    moving = false;
+    svg.classList.remove("moving");
+    updateLabels();
+  }
+  // rings for stories from the last hour (newest at each spot) and the selected story
+  let pulsing = [];
+  function syncPulses() {
+    const now = Date.now();
+    const want = state.stories.filter((s) => s._node && isShown(s) && s._top && now - s.time < 60 * 60 * 1000);
+    if (state.selected && !want.includes(state.selected)) want.push(state.selected);
+    for (const s of pulsing) if (!want.includes(s)) { s._pulse.remove(); s._pulse = null; }
+    for (const s of want) {
+      if (!s._pulse) {
+        s._pulse = el("span", { class: "pulse-ring", style: `--c:${CAT_BY_ID[s.cat].color}` });
+        s._pulse.append(el("span"));
+        pulseLayer.append(s._pulse);
+      }
+      s._pulse.classList.toggle("selected", s === state.selected);
+    }
+    pulsing = want;
+    placePulses();
+  }
+  function placePulses() {
+    for (const s of pulsing) {
+      const hidden = s._node.classList.contains("crowded") && s !== state.selected;
+      s._pulse.style.display = hidden ? "none" : "";
+      s._pulse.style.transform = `translate(${(view.x + s._x * view.k).toFixed(1)}px, ${(view.y + s._y * view.k).toFixed(1)}px)`;
+    }
+  }
+
   function apply() {
     updateCrowding();
-    updateLabels();
-    world.setAttribute("transform", `translate(${view.x.toFixed(2)},${view.y.toFixed(2)}) scale(${view.k.toFixed(4)})`);
+    if (!moving) {
+      moving = true;
+      svg.classList.add("moving");
+    }
+    clearTimeout(settleTimer);
+    settleTimer = setTimeout(settle, 150);
+    svg.style.transform = `translate(${view.x.toFixed(2)}px, ${view.y.toFixed(2)}px) scale(${view.k.toFixed(5)})`;
     // markers grow a little as you zoom in (up to 1.5×) so icons stay readable
     const z = Math.min(1.5, 0.8 + 0.25 * Math.log2(view.k / view.k0 + 1)).toFixed(3);
     for (const s of state.stories) {
       if (!s._node) continue;
       s._node.setAttribute("transform", `translate(${(view.x + s._x * view.k).toFixed(1)},${(view.y + s._y * view.k).toFixed(1)}) scale(${z})`);
     }
+    placePulses();
     $("#zoom-level").textContent = (view.k / view.k0).toFixed(1) + "×";
   }
 
@@ -695,13 +776,11 @@
       s._i = i;
       const cat = CAT_BY_ID[s.cat];
       const g = svgEl("g", { class: "dot", "data-i": i, style: `--c:${cat.color}` });
-      if (s._top && now - s.time < 60 * 60 * 1000) g.classList.add("fresh"); // one pulse per spot
       if (!s.precise) g.classList.add("approx");
-      if (!state.active.has(s.cat)) g.classList.add("hidden");
+      if (!isShown(s)) g.classList.add("hidden");
       if (s === state.selected) g.classList.add("selected");
       const mk = svgEl("g", { class: "mk" });
       mk.append(
-        svgEl("circle", { class: "pulse", r: 9 }),
         svgEl("circle", { class: "hit", r: 12 }),
         svgEl("circle", { class: "core", r: 8.5 }),
         svgEl("use", { class: "glyph", href: "#i-" + s.icon, x: -5.5, y: -5.5, width: 11, height: 11 })
@@ -718,7 +797,10 @@
       s._node = g;
       dotsLayer.append(g);
     }
+    for (const s of pulsing) if (s._pulse) s._pulse.remove(), (s._pulse = null);
+    pulsing = [];
     apply();
+    syncPulses();
   }
 
   // ---------------------------------------------------------------- pointer interaction
@@ -730,13 +812,16 @@
     const g = e.target.closest && e.target.closest(".dot");
     return g ? state.stories[+g.dataset.i] : null;
   }
+  // map controls that sit on top of the map handle their own clicks and scrolling
+  const ON_CONTROLS = ".zoom, .key-btn, .key-panel, .tooltip";
   function localPoint(e) {
-    const r = svg.getBoundingClientRect();
+    const r = wrap.getBoundingClientRect();
     return [e.clientX - r.left, e.clientY - r.top];
   }
 
-  svg.addEventListener("pointerdown", (e) => {
-    svg.setPointerCapture(e.pointerId);
+  wrap.addEventListener("pointerdown", (e) => {
+    if (e.target.closest(ON_CONTROLS)) return;
+    wrap.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, localPoint(e));
     cancelAnimationFrame(animFrame);
     if (pointers.size === 1) {
@@ -749,7 +834,7 @@
     }
   });
 
-  svg.addEventListener("pointermove", (e) => {
+  wrap.addEventListener("pointermove", (e) => {
     if (!pointers.has(e.pointerId)) {
       // hover tooltip (mouse only)
       if (e.pointerType === "mouse") showTooltip(storyFromEvent(e), e);
@@ -792,17 +877,19 @@
       wrap.classList.remove("dragging");
     }
   }
-  svg.addEventListener("pointerup", endPointer);
-  svg.addEventListener("pointercancel", endPointer);
-  svg.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") hideTooltip(); });
+  wrap.addEventListener("pointerup", endPointer);
+  wrap.addEventListener("pointercancel", endPointer);
+  wrap.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") hideTooltip(); });
 
-  svg.addEventListener("wheel", (e) => {
+  wrap.addEventListener("wheel", (e) => {
+    if (e.target.closest(ON_CONTROLS)) return;
     e.preventDefault();
     const [x, y] = localPoint(e);
     zoomAt(Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0018)), x, y, false);
   }, { passive: false });
 
-  svg.addEventListener("dblclick", (e) => {
+  wrap.addEventListener("dblclick", (e) => {
+    if (e.target.closest(ON_CONTROLS)) return;
     const [x, y] = localPoint(e);
     zoomAt(e.shiftKey ? 0.5 : 2, x, y, true);
   });
@@ -812,7 +899,7 @@
   $("#zoom-reset").addEventListener("click", () => reset(true));
 
   function showTooltip(story, e) {
-    if (!story || !state.active.has(story.cat)) return hideTooltip();
+    if (!story || !isShown(story)) return hideTooltip();
     const [x, y] = localPoint(e);
     tooltip.querySelector(".tt-place").textContent = story.place + " · " + ICON_BY_ID[story.icon].label;
     tooltip.querySelector(".tt-title").textContent = story.title;
@@ -834,13 +921,14 @@
   const panel = $("#story");
 
   function visibleStories() {
-    return state.stories.filter((s) => state.active.has(s.cat));
+    return state.stories.filter(isShown);
   }
 
   function select(story, opts = {}) {
     if (state.selected && state.selected._node) state.selected._node.classList.remove("selected");
     state.selected = story;
-    svg.classList.toggle("has-selection", !!story);
+    msvg.classList.toggle("has-selection", !!story);
+    if (pulsing.length || story) syncPulses();
     if (story && story._node) {
       story._node.classList.add("selected");
       story._node.classList.remove("crowded");
@@ -916,7 +1004,7 @@
     }
 
     // other stories at the same spot
-    const nearby = state.stories.filter((o) => o !== s && o._spot === s._spot && state.active.has(o.cat)).slice(0, 4);
+    const nearby = state.stories.filter((o) => o !== s && o._spot === s._spot && isShown(o)).slice(0, 4);
     const more = body.querySelector(".story-more");
     const list = more.querySelector("ul");
     list.textContent = "";
@@ -986,16 +1074,127 @@
     filters.append(all);
   }
   function applyFilters() {
-    for (const s of state.stories) if (s._node) s._node.classList.toggle("hidden", !state.active.has(s.cat));
+    for (const s of state.stories) if (s._node) s._node.classList.toggle("hidden", !isShown(s));
+    lastLimit = -1;
+    apply();
+    syncPulses();
     filters.querySelectorAll(".chip:not(.chip-all)").forEach((b, i) => {
       const c = [...CATEGORIES, OTHER][i];
       b.setAttribute("aria-pressed", String(state.active.has(c.id)));
     });
-    if (state.selected && !state.active.has(state.selected.cat)) select(null);
+    if (state.selected && !isShown(state.selected)) select(null);
     else renderStory();
     renderLatest();
     setStatus();
   }
+
+  // ---------------------------------------------------------------- search
+  const searchBox = $("#search");
+  const searchInput = $("#search-input");
+  const results = $("#search-results");
+  let resultItems = [];
+  let activeResult = -1;
+  let searchTimer = null;
+
+  function runSearch() {
+    const q = searchInput.value.trim().toLowerCase().slice(0, 100);
+    state.terms = q ? q.split(/\s+/).filter(Boolean) : [];
+    searchBox.classList.toggle("has-text", !!searchInput.value);
+    applyFilters();
+    renderResults();
+  }
+
+  // Highlight the search words in a title, building DOM nodes (never HTML).
+  function highlighted(text) {
+    const frag = document.createDocumentFragment();
+    if (!state.terms.length) { frag.append(text); return frag; }
+    const re = new RegExp("(" + state.terms.map(escapeRe).join("|") + ")", "gi");
+    let last = 0;
+    for (const m of text.matchAll(re)) {
+      if (m.index > last) frag.append(text.slice(last, m.index));
+      frag.append(el("mark", {}, m[0]));
+      last = m.index + m[0].length;
+    }
+    frag.append(text.slice(last));
+    return frag;
+  }
+
+  function renderResults() {
+    results.textContent = "";
+    resultItems = [];
+    activeResult = -1;
+    if (!state.terms.length) { closeResults(); return; }
+    const found = visibleStories();
+    const head = el("li", { class: "results-head", role: "presentation" },
+      found.length ? `${found.length} ${found.length === 1 ? "headline" : "headlines"} found · shown on the map` : "No headlines match");
+    results.append(head);
+    found.slice(0, 8).forEach((s, i) => {
+      const li = el("li", { role: "option", id: "result-" + i, class: "result", style: `--c:${CAT_BY_ID[s.cat].color}` });
+      const disc = el("span", { class: "latest-icon" });
+      disc.append(iconEl(s.icon, "latest-svg"));
+      const text = el("span", { class: "latest-text" });
+      const title = el("span", { class: "result-title" });
+      title.append(highlighted(s.title));
+      text.append(title, el("span", { class: "latest-meta" }, [s.place, timeAgo(s.time), s.domain].filter(Boolean).join(" · ")));
+      li.append(disc, text);
+      li.addEventListener("pointerdown", (e) => e.preventDefault()); // keep focus in the box
+      li.addEventListener("click", () => chooseResult(s));
+      results.append(li);
+      resultItems.push({ li, s });
+    });
+    results.hidden = false;
+    searchInput.setAttribute("aria-expanded", "true");
+  }
+  function closeResults() {
+    results.hidden = true;
+    searchInput.setAttribute("aria-expanded", "false");
+    searchInput.removeAttribute("aria-activedescendant");
+  }
+  function chooseResult(s) {
+    closeResults();
+    select(s, { zoom: true });
+  }
+  function highlightResult(i) {
+    if (!resultItems.length) return;
+    activeResult = (i + resultItems.length) % resultItems.length;
+    resultItems.forEach((r, j) => r.li.classList.toggle("active", j === activeResult));
+    searchInput.setAttribute("aria-activedescendant", "result-" + activeResult);
+    resultItems[activeResult].li.scrollIntoView({ block: "nearest" });
+  }
+  function clearSearch() {
+    searchInput.value = "";
+    runSearch();
+  }
+
+  searchInput.addEventListener("input", () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(runSearch, 120);
+  });
+  searchInput.addEventListener("focus", () => { if (state.terms.length) renderResults(); });
+  searchInput.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); if (results.hidden) renderResults(); highlightResult(activeResult + 1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); highlightResult(activeResult - 1); }
+    else if (e.key === "Enter") {
+      e.preventDefault();
+      clearTimeout(searchTimer);
+      if (searchInput.value.trim().toLowerCase() !== state.terms.join(" ")) runSearch();
+      const pick = resultItems[Math.max(0, activeResult)];
+      if (pick) chooseResult(pick.s);
+    } else if (e.key === "Escape") {
+      e.stopPropagation();
+      if (!results.hidden) closeResults();
+      else { clearSearch(); searchInput.blur(); }
+    }
+  });
+  $("#search-clear").addEventListener("click", () => { clearSearch(); searchInput.focus(); });
+  document.addEventListener("pointerdown", (e) => { if (!e.target.closest("#search")) closeResults(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "/" && !e.target.closest("input, textarea, select") && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      searchInput.focus();
+      searchInput.select();
+    }
+  });
 
   // ---------------------------------------------------------------- latest list, ticker, key
   function iconEl(id, cls) {
@@ -1088,6 +1287,7 @@
     renderFilters();
     renderLatest();
     renderTicker();
+    if (state.terms.length && !results.hidden) renderResults();
     if (keep && state.stories.includes(keep)) select(keep, { from: "map" });
     else select(null);
     setStatus();
