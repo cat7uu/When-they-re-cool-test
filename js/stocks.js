@@ -115,6 +115,7 @@
     if (lastFocus) lastFocus.focus({ preventScroll: true });
   }
   $("#stocks-back").addEventListener("click", () => closeStocks());
+  E.openStocks = () => openStocks();
   window.addEventListener("popstate", () => (location.hash === "#stocks" ? openStocks(true) : closeStocks(true)));
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !view.hidden) closeStocks();

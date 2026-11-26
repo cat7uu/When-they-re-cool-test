@@ -414,7 +414,9 @@
   const graticule = svgEl("g", { class: "graticule" });
   const land = svgEl("g", { class: "land" });
   const dotsLayer = svgEl("g", { class: "dots" });
-  world.append(graticule, land);
+  const night = svgEl("g", { class: "night" });
+  const labels = svgEl("g", { class: "labels" });
+  world.append(graticule, land, night, labels);
   svg.append(world, dotsLayer);
 
   // icon symbols, used by every marker and by the story panel
@@ -439,6 +441,9 @@
     for (let lat = -57; lat <= 84; lat += 1) outline.push(project(lat, 180));
     for (let lat = 84; lat >= -57; lat -= 1) outline.push(project(lat, -180));
     graticule.append(svgEl("path", { class: "sphere", d: line(outline) + "Z" }));
+    const clip = svgEl("clipPath", { id: "sphere-clip" });
+    clip.append(svgEl("path", { d: line(outline) + "Z" }));
+    graticule.append(clip);
     let d = "";
     for (let lon = -180; lon <= 180; lon += 30) {
       const pts = [];
@@ -457,6 +462,96 @@
       land.append(p);
     }
   })();
+
+  // ---------------------------------------------------------------- day and night
+  // Shade the part of the world where it's currently night. The sun's
+  // position comes from the date and time (good to within about a degree).
+  (function () {
+    const defs = svgEl("defs");
+    const blur = svgEl("filter", { id: "night-blur", x: "-5%", y: "-5%", width: "110%", height: "110%" });
+    blur.append(svgEl("feGaussianBlur", { stdDeviation: "5" }));
+    defs.append(blur);
+    // ocean deepens towards the edges; land is lit slightly from the north
+    const ocean = svgEl("radialGradient", { id: "ocean-grad", gradientUnits: "userSpaceOnUse", cx: "500", cy: "190", r: "560" });
+    ocean.append(svgEl("stop", { offset: "0", "stop-color": "#13213f" }), svgEl("stop", { offset: "0.6", "stop-color": "#0d1830" }), svgEl("stop", { offset: "1", "stop-color": "#081022" }));
+    const ground = svgEl("linearGradient", { id: "land-grad", gradientUnits: "userSpaceOnUse", x1: "0", y1: "0", x2: "0", y2: "435" });
+    ground.append(svgEl("stop", { offset: "0", "stop-color": "#2a3755" }), svgEl("stop", { offset: "0.5", "stop-color": "#222e4a" }), svgEl("stop", { offset: "1", "stop-color": "#1d2741" }));
+    defs.append(ocean, ground);
+    svg.append(defs);
+  })();
+  const nightPath = svgEl("path", { class: "night-shade", filter: "url(#night-blur)" });
+  night.append(nightPath);
+  function drawNight() {
+    const now = new Date();
+    const start = Date.UTC(now.getUTCFullYear(), 0, 0);
+    const day = (now - start) / 86400000;
+    const rad = Math.PI / 180;
+    let decl = -23.44 * Math.cos(((2 * Math.PI) / 365) * (day + 10));
+    if (Math.abs(decl) < 0.1) decl = 0.1;
+    // equation of time (minutes), so the shadow lines up with real solar noon
+    const b = ((2 * Math.PI) / 364) * (day - 81);
+    const eot = 9.87 * Math.sin(2 * b) - 7.53 * Math.cos(b) - 1.5 * Math.sin(b);
+    const utcHours = now.getUTCHours() + now.getUTCMinutes() / 60 + now.getUTCSeconds() / 3600;
+    const sunLon = -15 * (utcHours - 12 + eot / 60);
+    const clampLat = (v) => Math.max(-57, Math.min(84, v));
+    const pts = [];
+    for (let lon = -180; lon <= 180; lon += 2) {
+      const lat = Math.atan(-Math.cos((lon - sunLon) * rad) / Math.tan(decl * rad)) / rad;
+      pts.push(project(clampLat(lat), lon));
+    }
+    const pole = decl > 0 ? -57 : 84; // the pole tilted away from the sun is in darkness
+    for (let lon = 180; lon >= -180; lon -= 4) pts.push(project(pole, lon));
+    nightPath.setAttribute("d", "M" + pts.map((p) => p[0].toFixed(1) + "," + p[1].toFixed(1)).join("L") + "Z");
+    nightPath.setAttribute("clip-path", "url(#sphere-clip)");
+  }
+
+  // ---------------------------------------------------------------- country names
+  const SHORT_NAMES = {
+    "United States of America": "United States", "Dem. Rep. Congo": "DR Congo", "Central African Rep.": "C. African Rep.",
+    "Bosnia and Herz.": "Bosnia", "S. Sudan": "South Sudan", "Dominican Rep.": "Dominican Rep.", "W. Sahara": "W. Sahara",
+  };
+  const countryLabels = [];
+  // Size each label by the country's largest piece of land, so overseas
+  // islands and the date line (Alaska, Fiji, Kiribati) don't inflate it.
+  function mainlandBox(d, probe) {
+    let best = null;
+    for (const part of d.split(/(?=M)/)) {
+      probe.setAttribute("d", part);
+      const b = probe.getBBox();
+      if (!best || b.width * b.height > best.width * best.height) best = b;
+    }
+    return best;
+  }
+  function buildLabels() {
+    const probe = svgEl("path");
+    labels.append(probe);
+    land.querySelectorAll("path").forEach((p, i) => {
+      const c = W.countries[i];
+      const cen = W.centroids[c.n];
+      if (!cen || /Antarctic|Is\.$|Ter\.$/.test(c.n)) return;
+      const box = mainlandBox(c.d, probe);
+      if (box.width < 6) return;
+      const name = (SHORT_NAMES[c.n] || c.n).toUpperCase();
+      const [x, y] = project(cen[0], cen[1]);
+      const t = svgEl("text", { x: x.toFixed(1), y: y.toFixed(1) });
+      t.textContent = name;
+      labels.append(t);
+      countryLabels.push({ t, w: Math.min(box.width, box.height * 2.2), len: name.length });
+    });
+    probe.remove();
+  }
+  let labelK = 0;
+  function updateLabels() {
+    if (view.k === labelK) return;
+    labelK = view.k;
+    const fs = 9.5 / view.k;
+    labels.setAttribute("font-size", fs.toFixed(3));
+    labels.setAttribute("stroke-width", (3 / view.k).toFixed(3));
+    for (const l of countryLabels) {
+      // show a name only where the country is wide enough on screen to hold it
+      l.t.style.display = l.w * view.k > l.len * 7.2 + 10 ? "" : "none";
+    }
+  }
 
   const view = { w: 0, h: 0, k0: 1, k: 1, x: 0, y: 0 };
   const MAP_W = W.w, MAP_H = W.h;
@@ -559,6 +654,7 @@
 
   function apply() {
     updateCrowding();
+    updateLabels();
     world.setAttribute("transform", `translate(${view.x.toFixed(2)},${view.y.toFixed(2)}) scale(${view.k.toFixed(4)})`);
     // markers grow a little as you zoom in (up to 1.5×) so icons stay readable
     const z = Math.min(1.5, 0.8 + 0.25 * Math.log2(view.k / view.k0 + 1)).toFixed(3);
@@ -791,7 +887,8 @@
       ? "Placed using the place named in the headline"
       : "No place named in the headline — placed at the news outlet's country";
     body.querySelector(".story-approx").hidden = s.precise;
-    body.querySelector(".story-time").textContent = timeAgo(s.time);
+    body.querySelector(".story-time").textContent = timeAgo(s.time) + " · " +
+      s.time.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit", timeZoneName: "short" });
     body.querySelector(".story-time").dateTime = s.time.toISOString();
     const h = body.querySelector(".story-title");
     h.textContent = s.title;
@@ -896,8 +993,70 @@
     });
     if (state.selected && !state.active.has(state.selected.cat)) select(null);
     else renderStory();
+    renderLatest();
     setStatus();
   }
+
+  // ---------------------------------------------------------------- latest list, ticker, key
+  function iconEl(id, cls) {
+    const ic = svgEl("svg", { class: cls, viewBox: "0 0 24 24", "aria-hidden": "true" });
+    ic.append(svgEl("use", { href: "#i-" + id }));
+    return ic;
+  }
+
+  function renderLatest() {
+    const list = $("#latest");
+    list.textContent = "";
+    for (const s of visibleStories().slice(0, 6)) {
+      const b = el("button", { type: "button", class: "latest-item", style: `--c:${CAT_BY_ID[s.cat].color}` });
+      const disc = el("span", { class: "latest-icon" });
+      disc.append(iconEl(s.icon, "latest-svg"));
+      const text = el("span", { class: "latest-text" });
+      text.append(el("span", { class: "latest-title" }, s.title), el("span", { class: "latest-meta" }, [s.place, timeAgo(s.time), s.domain].filter(Boolean).join(" · ")));
+      b.append(disc, text);
+      b.addEventListener("click", () => select(s, { zoom: true }));
+      const li = el("li");
+      li.append(b);
+      list.append(li);
+    }
+  }
+
+  function renderTicker() {
+    const box = $("#ticker");
+    const items = $("#ticker-items");
+    const top = state.stories.filter((s) => !s.demo).slice(0, 14);
+    box.hidden = top.length < 3;
+    items.textContent = "";
+    // the list is drawn twice so the scroll can loop without a gap
+    for (let copy = 0; copy < 2; copy++) {
+      for (const s of top) {
+        const b = el("button", { type: "button", class: "ticker-item", style: `--c:${CAT_BY_ID[s.cat].color}` });
+        if (copy) b.setAttribute("aria-hidden", "true"), b.tabIndex = -1;
+        b.append(iconEl(s.icon, "ticker-icon"), el("span", { class: "ticker-place" }, s.place), document.createTextNode(" " + s.title));
+        b.addEventListener("click", () => select(s, { zoom: true }));
+        items.append(b);
+      }
+    }
+    requestAnimationFrame(() => items.style.setProperty("--dur", Math.max(30, items.scrollWidth / 2 / 55) + "s"));
+  }
+
+  (function renderKey() {
+    const list = $("#key-list");
+    for (const icon of [...window.ICONS, window.ICON_DEFAULT]) {
+      const li = el("li");
+      li.append(iconEl(icon.id, "key-icon"), el("span", {}, icon.label));
+      list.append(li);
+    }
+    const btn = $("#key-btn"), panel = $("#key-panel");
+    const toggle = (open) => { panel.hidden = !open; btn.setAttribute("aria-expanded", String(open)); };
+    btn.addEventListener("click", () => toggle(panel.hidden));
+    document.addEventListener("pointerdown", (e) => { if (!panel.hidden && !e.target.closest("#key-panel, #key-btn")) toggle(false); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") toggle(false); });
+  })();
+
+  $("#dateline").textContent = new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  $("#dateline").dateTime = new Date().toISOString().slice(0, 10);
+  $("#tab-markets").addEventListener("click", () => window.Earthwire.openStocks && window.Earthwire.openStocks());
 
   // ---------------------------------------------------------------- status
   function setStatus(mode) {
@@ -927,6 +1086,8 @@
     const keep = state.selected;
     renderDots();
     renderFilters();
+    renderLatest();
+    renderTicker();
     if (keep && state.stories.includes(keep)) select(keep, { from: "map" });
     else select(null);
     setStatus();
@@ -947,6 +1108,9 @@
   };
 
   new ResizeObserver(() => fit()).observe(wrap);
+  buildLabels();
+  drawNight();
+  setInterval(drawNight, 60 * 1000);
   fit();
   load();
   setInterval(load, REFRESH_MS);
