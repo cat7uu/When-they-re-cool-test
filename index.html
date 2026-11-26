@@ -17,8 +17,8 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self' https://api.gdeltproject.org https://raw.githubusercontent.com; base-uri 'none'; form-action 'none'; object-src 'none'; frame-src 'none'; manifest-src 'self'">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%2393c5fd' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='4.5' fill='%23ff5d5d'/%3E%3C/svg%3E">
-  <script src="js/theme.js?v=14"></script>
-  <link rel="stylesheet" href="css/styles.css?v=14">
+  <script src="js/theme.js?v=17"></script>
+  <link rel="stylesheet" href="css/styles.css?v=17">
 </head>
 <body>
   <header class="masthead">
@@ -116,6 +116,28 @@
           <span id="zoom-level" class="zoom-level">1.0×</span>
           <button type="button" id="zoom-out" aria-label="Zoom out" title="Zoom out (−)">−</button>
           <button type="button" id="zoom-reset" aria-label="Show whole world" title="Whole world (0)"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c-3 2.5-3 13.5 0 16M12 4c3 2.5 3 13.5 0 16"/></svg></button>
+        </div>
+        <canvas id="sim-canvas" class="sim-canvas" hidden></canvas>
+        <button type="button" class="sim-btn" id="sim-btn" aria-pressed="false" title="Fictional simulation of a nuclear war">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-nuke"/></svg><span>Nuclear simulation</span>
+        </button>
+        <div class="sim-hud" id="sim-hud" role="status" aria-live="polite" hidden>
+          <span class="sim-tag">Simulation · fictional</span>
+          <span class="sim-phase" id="sim-phase">Launch detected</span>
+          <span class="sim-stat"><b id="sim-clock">Alert</b></span>
+          <span class="sim-stat">Launched <b id="sim-launched">0</b></span>
+          <span class="sim-stat">Cities hit <b id="sim-hits">0</b></span>
+          <button type="button" class="sim-stop" id="sim-stop">Stop</button>
+        </div>
+        <div class="sim-card" id="sim-card" role="dialog" aria-labelledby="sim-card-title" hidden>
+          <p class="eyebrow">Simulation over</p>
+          <h2 id="sim-card-title">Nobody wins a nuclear war.</h2>
+          <p><span id="sim-total"></span> This was made up: random targets, no real plans or weapons data.</p>
+          <p>The real world has about <b>12,000 nuclear warheads</b>, held by nine countries. Scientists warn that smoke from burning cities could block sunlight for years — a "nuclear winter" — causing crop failures and famine far beyond the war itself.</p>
+          <div class="sim-actions">
+            <button type="button" class="btn" id="sim-close">Back to the news</button>
+            <button type="button" class="sim-again" id="sim-again">Run again</button>
+          </div>
         </div>
         <button type="button" class="key-btn" id="key-btn" aria-expanded="false" aria-controls="key-panel">Icon key</button>
         <div class="key-panel" id="key-panel" hidden>
@@ -224,11 +246,12 @@
     Map data: Natural Earth.
   </footer>
 
-  <script src="js/world.js?v=14"></script>
-  <script src="js/gazetteer.js?v=14"></script>
-  <script src="js/icons.js?v=14"></script>
-  <script src="js/demo.js?v=14"></script>
-  <script src="js/app.js?v=14"></script>
-  <script src="js/stocks.js?v=14"></script>
+  <script src="js/world.js?v=17"></script>
+  <script src="js/gazetteer.js?v=17"></script>
+  <script src="js/icons.js?v=17"></script>
+  <script src="js/demo.js?v=17"></script>
+  <script src="js/app.js?v=17"></script>
+  <script src="js/nuke.js?v=17"></script>
+  <script src="js/stocks.js?v=17"></script>
 </body>
 </html>

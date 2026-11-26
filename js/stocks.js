@@ -129,6 +129,7 @@
   }
   $("#stocks-back").addEventListener("click", () => closeStocks());
   E.openStocks = () => openStocks();
+  E.kabuSay = (text, mood) => say(text, false, mood);
   window.addEventListener("popstate", () => (location.hash === "#stocks" ? openStocks(true) : closeStocks(true)));
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !view.hidden) closeStocks();

@@ -814,7 +814,8 @@
     return g ? state.stories[+g.dataset.i] : null;
   }
   // map controls that sit on top of the map handle their own clicks and scrolling
-  const ON_CONTROLS = ".zoom, .key-btn, .key-panel, .tooltip";
+  // (any button, link or field, plus the panels that float over the map)
+  const ON_CONTROLS = "button, a, input, .zoom, .key-panel, .tooltip, .sim-hud, .sim-card";
   function localPoint(e) {
     const r = wrap.getBoundingClientRect();
     return [e.clientX - r.left, e.clientY - r.top];
@@ -1306,6 +1307,10 @@
     timeAgo,
     stories: () => state.stories,
     onStories: (fn) => storyListeners.push(fn),
+    // for the simulation overlay (js/nuke.js)
+    project,
+    view: () => ({ ...view }),
+    showWholeWorld: () => { select(null); reset(true); },
   };
 
   new ResizeObserver(() => fit()).observe(wrap);

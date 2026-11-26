@@ -934,3 +934,98 @@ body.stocks-open { overflow: hidden; }
   .search { flex: none; }
   .search-kbd { display: none; }
 }
+
+/* ---------------------------------------------------------------- nuclear simulation */
+.sim-btn {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 13px 8px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(250, 204, 21, 0.45);
+  background: rgb(var(--overlay) / 0.94);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgb(var(--shadow-rgb) / calc(0.4 * var(--shadow-k)));
+}
+.sim-btn svg { width: 16px; height: 16px; color: #facc15; }
+:root[data-theme="light"] .sim-btn svg { color: #a16207; }
+.sim-btn:hover { border-color: #facc15; }
+.sim-btn[aria-pressed="true"] { border-color: #f87171; }
+.sim-btn[aria-pressed="true"] span::before { content: "Stop "; }
+.sim-btn[aria-pressed="true"] span { text-transform: none; }
+
+.sim-canvas { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+.map-wrap.simulating #markers, .map-wrap.simulating .pulses { opacity: 0; pointer-events: none; transition: opacity 0.4s; }
+#markers, .pulses { transition: opacity 0.4s; }
+
+.sim-hud {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 7px 8px 7px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  background: rgb(var(--overlay) / 0.95);
+  font-size: 0.8rem;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 8px 24px rgb(var(--shadow-rgb) / calc(0.45 * var(--shadow-k)));
+}
+.sim-tag { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--down); }
+.sim-phase { font-weight: 700; }
+.sim-stat { color: var(--muted); }
+.sim-stat b { color: var(--text); }
+.sim-stop { padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line); background: rgb(var(--tint) / 0.08); cursor: pointer; font-weight: 600; font-size: 0.78rem; }
+
+.sim-card {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  z-index: 6;
+  width: min(460px, calc(100% - 32px));
+  padding: 20px 22px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: rgb(var(--overlay) / 0.97);
+  box-shadow: 0 20px 50px rgb(var(--shadow-rgb) / calc(0.6 * var(--shadow-k)));
+  animation: rise 0.4s ease-out;
+}
+.sim-card h2 { margin: 0 0 10px; font-family: var(--serif); font-size: 1.5rem; line-height: 1.2; }
+.sim-card p { margin: 0 0 10px; color: var(--muted); line-height: 1.5; font-size: 0.9rem; }
+.sim-card p b { color: var(--text); }
+.sim-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.sim-again { padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line); background: none; cursor: pointer; font-size: 0.85rem; }
+body.sim-active .ticker-items { animation-play-state: paused; }
+
+@media (max-width: 760px) {
+  .sim-btn { top: 12px; transform: none; padding: 6px 10px 6px 8px; font-size: 0.74rem; }
+  .sim-btn span { display: none; }
+  .sim-btn[aria-pressed="true"] span { display: inline; }
+  .sim-btn[aria-pressed="true"] span::before { content: ""; }
+  .sim-btn[aria-pressed="true"] span { font-size: 0; }
+  .sim-btn[aria-pressed="true"] span::after { content: "Stop"; font-size: 0.74rem; }
+  .sim-hud { top: 52px; gap: 8px; font-size: 0.72rem; padding: 6px 6px 6px 10px; }
+  .sim-tag, .sim-phase { display: none; }
+  /* the map is short on phones: the ending card fills it and scrolls, and the status bar steps aside */
+  .sim-card { top: 12px; transform: translateX(-50%); padding: 16px; }
+  .sim-card h2 { font-size: 1.25rem; }
+  .sim-hud.done { display: none; }
+  body.sim-active .mascot-wrap { display: none; } /* no room for Kabu over the ending card */
+}
