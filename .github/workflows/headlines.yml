@@ -13,9 +13,13 @@ on:
       - .github/workflows/headlines.yml
       - scripts/fetch-headlines.mjs
       - scripts/fetch-stocks.mjs
+      - scripts/publish-data.sh
 
 permissions:
   contents: write
+
+env:
+  TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 concurrency:
   group: headlines
@@ -45,19 +49,12 @@ jobs:
       - name: Fetch stocks
         run: node scripts/fetch-stocks.mjs out/stocks.json || echo "::warning::Stock prices not updated"
 
+      # Publish stock prices straight away; headlines can take several minutes.
+      - name: Publish stocks
+        run: bash scripts/publish-data.sh
+
       - name: Fetch headlines
         run: node scripts/fetch-headlines.mjs out/headlines.json || echo "::warning::Headlines not updated"
 
-      - name: Publish to the data branch
-        working-directory: out
-        env:
-          TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git init -q -b data
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          ls *.json
-          git add *.json
-          git commit -q -m "Update headlines"
-          # Replace the branch each time so it stays one small commit.
-          git push -q -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" data
+      - name: Publish headlines
+        run: bash scripts/publish-data.sh

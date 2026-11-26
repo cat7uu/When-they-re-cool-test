@@ -107,21 +107,31 @@
     if (e.key === "Escape" && !view.hidden) closeStocks();
   });
 
+  let retryTimer = null;
   async function loadStocks() {
     const base = E.dataBase();
     const status = $("#stocks-status");
+    clearTimeout(retryTimer);
     if (!base) {
       status.textContent = "Prices are saved by the site's GitHub job, so they only show on the published site.";
       return;
     }
-    status.textContent = "Loading prices…";
+    if (!data) status.textContent = "Loading prices…";
     try {
-      data = await E.fetchJSON(base + "stocks.json", 15000);
+      data = await E.fetchJSON(base + "stocks.json?t=" + Date.now(), 15000);
       loadedAt = Date.now();
+      render();
     } catch (err) {
       console.warn("Stock prices unavailable:", err);
+      if (!data) {
+        status.textContent = "Prices aren't ready yet. The site's GitHub job saves them every 30 minutes. Trying again in a minute…";
+        const retry = el("button", { type: "button", class: "retry-btn" }, "Retry now");
+        retry.addEventListener("click", loadStocks);
+        status.append(" ", retry);
+        render(true);
+      }
+      if (!view.hidden) retryTimer = setTimeout(loadStocks, 60000);
     }
-    render();
   }
 
   // headlines for a stock: Yahoo Finance's (saved by the job) + matching map headlines
@@ -164,10 +174,10 @@
     return li;
   }
 
-  function render() {
+  function render(keepStatus) {
     const bySymbol = new Map(((data && data.stocks) || []).map((s) => [s.symbol, s]));
     const status = $("#stocks-status");
-    if (data) {
+    if (data && !keepStatus) {
       const t = Math.max(...data.stocks.map((s) => s.marketTime || 0));
       status.textContent = `Prices as of ${new Date(t).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit", timeZoneName: "short" })} · updated every 30 minutes · not live`;
     }
@@ -202,7 +212,7 @@
       const lo = Math.min(...q.closes.map((c) => c[1])), hi = Math.max(...q.closes.map((c) => c[1]));
       art.append(el("p", { class: "range" }, `1-month range ${money(lo, q.currency)} – ${money(hi, q.currency)}`));
     } else {
-      art.append(el("p", { class: "no-price" }, data ? "Price unavailable right now." : "Price loading…"));
+      art.append(el("p", { class: "no-price" }, data ? "Price unavailable right now." : "Waiting for prices…"));
     }
 
     const hl = headlinesFor(stock, q);
