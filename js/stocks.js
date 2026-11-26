@@ -43,34 +43,47 @@
   const bubbleActions = $(".bubble-actions", bubble);
   let hideTimer = null;
 
-  function say(text, withChoices) {
+  // mood: "" (happy) or "annoyed"
+  function say(text, withChoices, mood = "") {
     clearTimeout(hideTimer);
     bubbleText.textContent = text;
     bubbleActions.hidden = !withChoices;
     bubble.hidden = false;
     mascot.classList.add("talking");
+    mascot.classList.toggle("annoyed", mood === "annoyed");
     mascot.setAttribute("aria-expanded", "true");
     if (withChoices) $("#bubble-yes").focus({ preventScroll: true });
-    else hideTimer = setTimeout(closeBubble, 2200);
+    else hideTimer = setTimeout(closeBubble, mood ? 3200 : 2200);
   }
   function closeBubble() {
+    clearTimeout(hideTimer);
     bubble.hidden = true;
-    mascot.classList.remove("talking");
+    mascot.classList.remove("talking", "annoyed");
     mascot.setAttribute("aria-expanded", "false");
   }
 
+  let taps = 0;
   mascot.addEventListener("click", () => {
-    mascot.classList.remove("hop");
-    void mascot.offsetWidth; // restart the hop animation
-    mascot.classList.add("hop");
-    if (!bubble.hidden && !bubbleActions.hidden) closeBubble();
-    else say("Do you want to see the stocks?", true);
+    taps++;
+    mascot.classList.remove("hop", "shake");
+    void mascot.offsetWidth; // restart the animation
+    if (taps % 10 === 0) {
+      mascot.classList.add("shake");
+      say("Seriously, are you still gonna tap me?", false, "annoyed");
+    } else {
+      mascot.classList.add("hop");
+      say("Do you want to see the stocks?", true);
+    }
   });
   $("#bubble-yes").addEventListener("click", () => {
     closeBubble();
     openStocks();
   });
-  $("#bubble-no").addEventListener("click", () => say("Okay! Tap me anytime~", false));
+  $("#bubble-no").addEventListener("click", () => say("Why did you even wanna click?", false, "annoyed"));
+  // tapping anywhere else closes the bubble
+  document.addEventListener("pointerdown", (e) => {
+    if (!bubble.hidden && !e.target.closest(".mascot-wrap")) closeBubble();
+  });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !bubble.hidden) closeBubble();
   });

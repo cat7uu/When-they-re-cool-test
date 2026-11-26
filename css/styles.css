@@ -461,6 +461,11 @@ main {
 .mascot .k-open { display: none; }
 .mascot.talking .k-open { display: inline; }
 .mascot.talking .k-smile { display: none; }
+.mascot .k-annoyed { display: none; }
+.mascot.annoyed .k-annoyed { display: inline; }
+.mascot.annoyed .k-open, .mascot.annoyed .k-smile { display: none; }
+.mascot.shake svg { animation: shake 0.5s; }
+@keyframes shake { 20%, 60% { transform: translateX(-4px) rotate(-3deg); } 40%, 80% { transform: translateX(4px) rotate(3deg); } }
 .mascot.hop svg { animation: hop 0.45s cubic-bezier(0.3, 1.6, 0.5, 1); }
 .mascot:focus-visible { outline-offset: 4px; border-radius: 16px; }
 @keyframes float { 50% { transform: translateY(-3px); } }
