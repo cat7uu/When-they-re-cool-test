@@ -455,8 +455,8 @@ main {
 }
 .mascot svg { width: 100%; height: 100%; overflow: visible; }
 .mascot .k-body { animation: float 3.2s ease-in-out infinite; transform-origin: 60px 140px; }
-.mascot .k-eyes { animation: kblink 4.6s infinite; transform-origin: 60px 71px; transform-box: view-box; }
-.mascot .k-ahoge { transform-origin: 62px 22px; transform-box: view-box; transition: transform 0.3s; }
+.mascot .k-eyes { animation: kblink 4.6s infinite; transform-origin: 60px 64px; transform-box: view-box; }
+.mascot .k-ahoge { transform-origin: 42px 42px; transform-box: view-box; transition: transform 0.3s; }
 .mascot:hover .k-ahoge { transform: rotate(-14deg); }
 .mascot .k-open { display: none; }
 .mascot.talking .k-open { display: inline; }

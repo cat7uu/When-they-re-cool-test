@@ -1,4 +1,4 @@
-// Kabu, the corner mascot, and the stocks page she opens.
+// Kabu, the corner cat mascot, and the stocks page she opens.
 (function () {
   "use strict";
 
