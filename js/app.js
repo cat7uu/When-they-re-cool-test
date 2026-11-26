@@ -162,6 +162,24 @@
     return best;
   }
 
+  // ---------------------------------------------------------------- icons
+  // Pick a marker icon from the headline (see js/icons.js for the word lists).
+  const iconMatchers = window.ICONS.map((icon) => {
+    const exact = icon.words.filter((w) => /[A-Z]/.test(w));
+    const loose = icon.words.filter((w) => !/[A-Z]/.test(w));
+    const build = (words, flags) => words.length
+      ? new RegExp("(?<![\\p{L}\\p{N}])(" + words.map(escapeRe).join("|") + ")(?![\\p{L}\\p{N}])", flags)
+      : null;
+    return { icon, exact: build(exact, "u"), loose: build(loose, "iu") };
+  });
+  const ICON_BY_ID = Object.fromEntries([...window.ICONS, window.ICON_DEFAULT].map((i) => [i.id, i]));
+  function pickIcon(title) {
+    for (const m of iconMatchers) {
+      if ((m.exact && m.exact.test(title)) || (m.loose && m.loose.test(title))) return m.icon.id;
+    }
+    return window.ICON_DEFAULT.id;
+  }
+
   // ---------------------------------------------------------------- data
   function parseSeen(s) {
     const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(s || "");
@@ -189,6 +207,7 @@
       time,
       image: safeUrl(a.socialimage, true),
       cat: categorise(title),
+      icon: pickIcon(title),
       place: place.name,
       lat: place.lat,
       lon: place.lon,
@@ -398,6 +417,21 @@
   world.append(graticule, land);
   svg.append(world, dotsLayer);
 
+  // icon symbols, used by every marker and by the story panel
+  (function defineIcons() {
+    const defs = svgEl("defs");
+    for (const icon of Object.values(ICON_BY_ID)) {
+      const sym = svgEl("symbol", {
+        id: "i-" + icon.id, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor",
+        "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round",
+      });
+      sym.innerHTML = icon.svg; // fixed strings from js/icons.js, never outside data
+      sym.querySelectorAll(".f").forEach((n) => { n.setAttribute("fill", "currentColor"); n.setAttribute("stroke", "none"); });
+      defs.append(sym);
+    }
+    svg.prepend(defs);
+  })();
+
   // sphere outline + graticule
   (function drawBase() {
     const line = (pts) => "M" + pts.map((p) => p.map((v) => v.toFixed(1)).join(",")).join("L");
@@ -505,11 +539,32 @@
     animateTo(t);
   }
 
-  function apply() {
-    world.setAttribute("transform", `translate(${view.x.toFixed(2)},${view.y.toFixed(2)}) scale(${view.k.toFixed(4)})`);
+  // At world view only the newest few markers at each spot are shown, with a
+  // "+N" badge; zooming in reveals the rest.
+  let lastLimit = -1;
+  function updateCrowding() {
+    const limit = Math.max(4, Math.floor(4 * Math.pow(view.k / view.k0, 2)));
+    if (limit === lastLimit) return;
+    lastLimit = limit;
     for (const s of state.stories) {
       if (!s._node) continue;
-      s._node.setAttribute("transform", `translate(${(view.x + s._x * view.k).toFixed(1)},${(view.y + s._y * view.k).toFixed(1)})`);
+      s._node.classList.toggle("crowded", s._n >= limit && s !== state.selected);
+      if (s._badge) {
+        const more = s._spotSize - Math.min(limit, s._spotSize);
+        s._badge.style.display = more > 0 ? "" : "none";
+        s._badge.querySelector("text").textContent = "+" + (more > 99 ? 99 : more);
+      }
+    }
+  }
+
+  function apply() {
+    updateCrowding();
+    world.setAttribute("transform", `translate(${view.x.toFixed(2)},${view.y.toFixed(2)}) scale(${view.k.toFixed(4)})`);
+    // markers grow a little as you zoom in (up to 1.5×) so icons stay readable
+    const z = Math.min(1.5, 0.8 + 0.25 * Math.log2(view.k / view.k0 + 1)).toFixed(3);
+    for (const s of state.stories) {
+      if (!s._node) continue;
+      s._node.setAttribute("transform", `translate(${(view.x + s._x * view.k).toFixed(1)},${(view.y + s._y * view.k).toFixed(1)}) scale(${z})`);
     }
     $("#zoom-level").textContent = (view.k / view.k0).toFixed(1) + "×";
   }
@@ -522,12 +577,16 @@
       const k = x.toFixed(0) + "," + y.toFixed(0);
       const n = groups.get(k) || 0;
       groups.set(k, n + 1);
-      const r = n === 0 ? 0 : 1.3 * Math.sqrt(n);
+      const r = n === 0 ? 0 : 2 * Math.sqrt(n);
       const a = n * 2.39996;
       s._x = x + r * Math.cos(a);
       s._y = y + r * Math.sin(a);
       s._spot = k;
+      s._top = n === 0; // newest story at this spot (stories are sorted newest first)
+      s._n = n;
     }
+    for (const s of state.stories) s._spotSize = groups.get(s._spot);
+    lastLimit = -1;
   }
 
   function renderDots() {
@@ -540,11 +599,26 @@
       s._i = i;
       const cat = CAT_BY_ID[s.cat];
       const g = svgEl("g", { class: "dot", "data-i": i, style: `--c:${cat.color}` });
-      if (now - s.time < 60 * 60 * 1000) g.classList.add("fresh");
+      if (s._top && now - s.time < 60 * 60 * 1000) g.classList.add("fresh"); // one pulse per spot
       if (!s.precise) g.classList.add("approx");
       if (!state.active.has(s.cat)) g.classList.add("hidden");
       if (s === state.selected) g.classList.add("selected");
-      g.append(svgEl("circle", { class: "pulse", r: 6 }), svgEl("circle", { class: "hit", r: 11 }), svgEl("circle", { class: "core", r: 4.5 }));
+      const mk = svgEl("g", { class: "mk" });
+      mk.append(
+        svgEl("circle", { class: "pulse", r: 9 }),
+        svgEl("circle", { class: "hit", r: 12 }),
+        svgEl("circle", { class: "core", r: 8.5 }),
+        svgEl("use", { class: "glyph", href: "#i-" + s.icon, x: -5.5, y: -5.5, width: 11, height: 11 })
+      );
+      if (s._top && s._spotSize > 1) {
+        const badge = svgEl("g", { class: "badge", transform: "translate(8 -8)" });
+        badge.append(svgEl("rect", { x: -7, y: -5, width: 14, height: 10, rx: 5 }), svgEl("text", { y: 0.5 }));
+        mk.append(badge);
+        s._badge = badge;
+      } else {
+        s._badge = null;
+      }
+      g.append(mk);
       s._node = g;
       dotsLayer.append(g);
     }
@@ -644,7 +718,7 @@
   function showTooltip(story, e) {
     if (!story || !state.active.has(story.cat)) return hideTooltip();
     const [x, y] = localPoint(e);
-    tooltip.querySelector(".tt-place").textContent = story.place;
+    tooltip.querySelector(".tt-place").textContent = story.place + " · " + ICON_BY_ID[story.icon].label;
     tooltip.querySelector(".tt-title").textContent = story.title;
     tooltip.style.setProperty("--c", CAT_BY_ID[story.cat].color);
     tooltip.hidden = false;
@@ -673,6 +747,7 @@
     svg.classList.toggle("has-selection", !!story);
     if (story && story._node) {
       story._node.classList.add("selected");
+      story._node.classList.remove("crowded");
       dotsLayer.append(story._node); // bring to front
     }
     renderStory();
@@ -705,7 +780,12 @@
     body.hidden = false;
     const cat = CAT_BY_ID[s.cat];
     body.style.setProperty("--c", cat.color);
-    body.querySelector(".story-cat").textContent = cat.label;
+    const catEl = body.querySelector(".story-cat");
+    catEl.textContent = "";
+    const ic = svgEl("svg", { class: "story-icon", viewBox: "0 0 24 24", "aria-hidden": "true" });
+    ic.append(svgEl("use", { href: "#i-" + s.icon }));
+    catEl.append(ic, document.createTextNode(ICON_BY_ID[s.icon].label));
+    catEl.title = "Topic: " + cat.label;
     body.querySelector(".story-place").textContent = s.place;
     body.querySelector(".story-place").title = s.precise
       ? "Placed using the place named in the headline"

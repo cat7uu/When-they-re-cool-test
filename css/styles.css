@@ -188,7 +188,7 @@ main {
   border: 1px solid color-mix(in srgb, var(--c) 35%, transparent);
   font-weight: 600;
 }
-.story-cat::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
+.story-icon { width: 16px; height: 16px; color: var(--c); flex: none; }
 .story-place { color: var(--text); font-weight: 600; }
 .story-place::before { content: "⌖ "; color: var(--muted); font-weight: 400; }
 .story-approx { margin-left: -4px; font-size: 0.75rem; color: var(--faint); }
@@ -324,23 +324,31 @@ main {
 .land path:hover { fill: var(--land-hover); }
 
 .dot { cursor: pointer; transition: opacity 0.2s; }
+.dot .mk { transition: transform 0.15s; transform-box: fill-box; transform-origin: center; }
 .dot .hit { fill: transparent; }
 .dot .core {
   fill: var(--c);
-  stroke: rgba(11, 16, 32, 0.85);
-  stroke-width: 1.2;
-  filter: drop-shadow(0 0 3px var(--c));
-  transition: r 0.15s;
+  stroke: rgba(11, 16, 32, 0.9);
+  stroke-width: 1.4;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.6));
 }
-.dot.approx .core { fill-opacity: 0.55; stroke: var(--c); stroke-opacity: 0.9; }
+.dot .glyph { color: #0b1020; pointer-events: none; }
+/* placed at the outlet's country, not a named place: hollow marker */
+.dot.approx .core { fill: #0f172a; fill-opacity: 0.85; stroke: var(--c); stroke-width: 1.6; }
+.dot.approx .glyph { color: var(--c); }
 .dot .pulse { fill: none; stroke: var(--c); stroke-width: 1.5; opacity: 0; transform-box: fill-box; transform-origin: center; }
 .dot.fresh .pulse { animation: ping 2.2s cubic-bezier(0, 0, 0.2, 1) infinite; }
-@keyframes ping { 0% { opacity: 0.85; transform: scale(0.6); } 100% { opacity: 0; transform: scale(2.6); } }
-.dot:hover .core { r: 6.5; }
+@keyframes ping { 0% { opacity: 0.85; transform: scale(0.8); } 100% { opacity: 0; transform: scale(2.4); } }
+.dot:hover .mk { transform: scale(1.3); }
 .dot.hidden { opacity: 0; pointer-events: none; }
+.dot.crowded { display: none; }
+.dot .badge rect { fill: #e2e8f0; stroke: #0b1020; stroke-width: 1.2; }
+.dot .badge text { fill: #0b1020; font: 700 7px var(--sans); text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+.dot:hover .badge, .dot.selected .badge { display: none; }
 .dot.hidden .pulse { animation: none; }
-#map.has-selection .dot:not(.selected):not(.hidden) { opacity: 0.55; }
-.dot.selected .core { r: 7.5; stroke: #fff; stroke-width: 2; }
+#map.has-selection .dot:not(.selected):not(.hidden) { opacity: 0.5; }
+.dot.selected .mk { transform: scale(1.55); }
+.dot.selected .core { stroke: #fff; stroke-width: 1.6; }
 .dot.selected .pulse { animation: ping 1.6s cubic-bezier(0, 0, 0.2, 1) infinite; stroke-width: 2; }
 
 .tooltip {
