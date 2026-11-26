@@ -17,6 +17,38 @@ const deadline = Date.now() + 8 * 60_000; // the job has a 15 min limit
 const timeLeft = () => deadline - Date.now();
 const UA = "Mozilla/5.0 (compatible; EarthwireBot/1.0; news map)";
 
+// Everything below comes from outside sources, so cap sizes and keep only
+// clean values: http(s) links, https images, plain text of limited length.
+const MAX_BYTES = 5 * 1024 * 1024;
+const MAX_ARTICLES = 2500;
+async function readText(res) {
+  const len = Number(res.headers.get("content-length") || 0);
+  if (len > MAX_BYTES) throw new Error("response too large");
+  const text = await res.text();
+  if (text.length > MAX_BYTES) throw new Error("response too large");
+  return text;
+}
+function safeUrl(u, httpsOnly = false) {
+  if (typeof u !== "string" || u.length > 2048) return "";
+  try {
+    const url = new URL(u);
+    if (url.protocol === "https:" || (!httpsOnly && url.protocol === "http:")) return url.href;
+  } catch {}
+  return "";
+}
+const clean = (v, max) =>
+  typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, " ").trim().slice(0, max) : "";
+function sanitize(a) {
+  const url = safeUrl(a.url);
+  const title = clean(a.title, 300);
+  if (!url || !title) return null;
+  const out = { title, url, domain: clean(a.domain, 80), socialimage: safeUrl(a.socialimage, true), sourcecountry: clean(a.sourcecountry, 60) };
+  if (Number.isFinite(a.time)) out.time = Math.min(a.time, Date.now());
+  else out.seendate = /^\d{8}T\d{6}Z$/.test(a.seendate || "") ? a.seendate : "";
+  if (a.summary) out.summary = clean(a.summary, 300);
+  return out;
+}
+
 // [source country, feed url]
 const FEEDS = [
   ["United Kingdom", "https://feeds.bbci.co.uk/news/world/rss.xml"],
@@ -89,7 +121,7 @@ async function getFeed([country, url]) {
   try {
     const res = await fetch(url, { headers: { "user-agent": UA }, signal: AbortSignal.timeout(20_000) });
     if (!res.ok) throw new Error("HTTP " + res.status);
-    const items = parseFeed(await res.text(), country);
+    const items = parseFeed(await readText(res), country);
     console.log(`${String(items.length).padStart(3)} from ${url}`);
     return items;
   } catch (err) {
@@ -108,7 +140,7 @@ async function getGdelt({ q, sort }) {
   for (let attempt = 1; attempt <= 4 && timeLeft() > 30_000; attempt++) {
     try {
       const res = await fetch("https://api.gdeltproject.org/api/v2/doc/doc?" + p, { signal: AbortSignal.timeout(Math.min(60_000, timeLeft() - 10_000)) });
-      const text = await res.text();
+      const text = await readText(res);
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 60)}`);
       const arts = (JSON.parse(text).articles || []).filter((a) => !a.language || a.language === "English");
       console.log(`${String(arts.length).padStart(3)} from GDELT ${sort}`);
@@ -132,13 +164,13 @@ async function main() {
 
   const cutoff = Date.now() - 36 * 60 * 60 * 1000;
   const seen = new Set();
-  const articles = all.filter((a) => {
+  const articles = all.map(sanitize).filter(Boolean).filter((a) => {
     const key = a.url.replace(/[?#].*$/, "");
     const t = a.time || 0;
     if (seen.has(key) || (t && t < cutoff)) return false;
     seen.add(key);
     return true;
-  });
+  }).slice(0, MAX_ARTICLES);
 
   if (!articles.length) {
     console.error("No headlines fetched; leaving the previous file in place.");

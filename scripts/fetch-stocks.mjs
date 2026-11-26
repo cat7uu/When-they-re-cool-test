@@ -34,7 +34,9 @@ async function yahoo(path) {
       try {
         const res = await fetch(`https://${host}${path}`, { headers: { "user-agent": UA }, signal: AbortSignal.timeout(20_000) });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return await res.json();
+        const text = await res.text();
+        if (text.length > 2 * 1024 * 1024) throw new Error("response too large");
+        return JSON.parse(text);
       } catch (err) {
         last = err;
         await sleep(1500 * attempt);
@@ -61,6 +63,7 @@ async function getStock(s) {
     const before = closes.filter(([t]) => nyDate(t / 1000) < today);
     const prevClose = before.length ? before[before.length - 1][1] : m.chartPreviousClose;
     const price = m.regularMarketPrice;
+    if (!Number.isFinite(price) || !Number.isFinite(prevClose) || prevClose <= 0) throw new Error("bad price data");
     Object.assign(result, {
       fullName: m.longName || m.shortName || s.name,
       currency: m.currency || "USD",
@@ -83,9 +86,14 @@ async function getStock(s) {
     const data = await yahoo(`/v1/finance/search?q=${encodeURIComponent(s.query || s.symbol)}&quotesCount=0&newsCount=20`);
     const re = matcher(s.words);
     result.news = (data.news || [])
-      .filter((n) => n.title && n.link && re.test(n.title))
+      .filter((n) => typeof n.title === "string" && typeof n.link === "string" && /^https?:\/\//.test(n.link) && re.test(n.title))
       .slice(0, 6)
-      .map((n) => ({ title: n.title, url: n.link, domain: n.publisher || "", time: (n.providerPublishTime || 0) * 1000 }));
+      .map((n) => ({
+        title: n.title.slice(0, 300),
+        url: n.link.slice(0, 2048),
+        domain: typeof n.publisher === "string" ? n.publisher.slice(0, 80) : "",
+        time: Number.isFinite(n.providerPublishTime) ? n.providerPublishTime * 1000 : 0,
+      }));
   } catch (err) {
     console.warn(`${s.symbol}: news failed (${err.message})`);
     result.news = [];

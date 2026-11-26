@@ -60,8 +60,26 @@
     return d + (d === 1 ? " day ago" : " days ago");
   }
 
+  // ---------------------------------------------------------------- safety
+  // Headlines, links and images come from outside sources (news feeds, GDELT,
+  // the saved data files), so treat every value as untrusted: only http(s)
+  // links, only https images, text set with textContent (never innerHTML),
+  // and lengths and counts capped.
+  const MAX_ARTICLES = 3000;
+  const MAX_RESPONSE_CHARS = 8 * 1024 * 1024;
+  function safeUrl(u, httpsOnly = false) {
+    if (typeof u !== "string" || u.length > 2048) return "";
+    try {
+      const url = new URL(u);
+      if (url.protocol === "https:" || (!httpsOnly && url.protocol === "http:")) return url.href;
+    } catch (_) { /* not a URL */ }
+    return "";
+  }
+  const safeText = (v, max) => (typeof v === "string" ? v.slice(0, max) : "");
+
   function cleanTitle(t) {
-    return String(t || "")
+    return safeText(t, 400)
+      .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, "") // control and direction-override characters
       .replace(/\s+([,.;:!?%])/g, "$1")
       .replace(/(\d) - (?=[\p{L}\d])/gu, "$1-") // GDELT spaces out hyphens: "31 - Year - Old"
       .replace(/([\p{L}\d]) - (?=\p{Ll})/gu, "$1-") // "ex - strongman"
@@ -151,26 +169,33 @@
   }
 
   function toStory(a) {
+    if (!a || typeof a !== "object") return null;
     const title = cleanTitle(a.title);
     if (title.length < 12) return null;
     // Look for a place in the headline, then in the summary (RSS feeds have one),
     // and finally fall back to the outlet's country.
-    const place = geo.locate(title) || (a.summary && geo.locate(a.summary)) || geo.country(a.sourcecountry);
+    const summary = safeText(a.summary, 400);
+    const country = safeText(a.sourcecountry, 60);
+    const place = geo.locate(title) || (summary && geo.locate(summary)) || geo.country(country);
     if (!place) return null;
+    const url = safeUrl(a.url);
+    if (!url && !a.demo) return null; // a story without a safe link isn't shown
+    let time = Number.isFinite(a.time) ? new Date(a.time) : parseSeen(safeText(a.seendate, 20));
+    if (time.getTime() > Date.now()) time = new Date(); // no stories "from the future"
     return {
       title,
-      url: a.url || "",
-      domain: a.domain || "",
-      time: a.time ? new Date(a.time) : parseSeen(a.seendate),
-      image: a.socialimage || "",
+      url,
+      domain: safeText(a.domain, 80) || (url ? new URL(url).hostname : ""),
+      time,
+      image: safeUrl(a.socialimage, true),
       cat: categorise(title),
       place: place.name,
       lat: place.lat,
       lon: place.lon,
       precise: place.precise,
       demo: !!a.demo,
-      src: a.sourcecountry || "",
-      summary: a.summary || "",
+      src: country,
+      summary,
     };
   }
 
@@ -181,6 +206,7 @@
       const res = await fetch(url, { signal: ctl.signal, cache: "no-cache" });
       if (!res.ok) throw new Error("HTTP " + res.status);
       const text = await res.text();
+      if (text.length > MAX_RESPONSE_CHARS) throw new Error("Response too large");
       return JSON.parse(text); // GDELT sends plain-text errors, which throw here
     } finally {
       clearTimeout(timer);
@@ -214,7 +240,8 @@
 
   function addArticles(articles) {
     let added = 0;
-    for (const a of articles) {
+    if (!Array.isArray(articles)) return 0;
+    for (const a of articles.slice(0, MAX_ARTICLES)) {
       const s = toStory(a);
       if (!s) continue;
       const k = keyOf(s.title);
@@ -246,7 +273,7 @@
   function loadCache() {
     try {
       const c = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
-      if (c && Date.now() - c.at < CACHE_MAX_AGE && c.articles.length) return c;
+      if (c && Number.isFinite(c.at) && Date.now() - c.at < CACHE_MAX_AGE && Array.isArray(c.articles) && c.articles.length) return c;
     } catch (_) { /* ignore */ }
     return null;
   }
@@ -293,7 +320,7 @@
     if (!url) return null;
     try {
       const snap = await fetchJSON(url, 10000);
-      return snap && snap.articles && snap.articles.length ? snap : null;
+      return snap && Number.isFinite(snap.at) && Array.isArray(snap.articles) && snap.articles.length ? snap : null;
     } catch (err) {
       console.warn("Saved headlines unavailable:", err);
       return null;
@@ -692,7 +719,7 @@
     if (s.url) {
       link.hidden = false;
       link.href = s.url;
-      link.querySelector(".story-domain").textContent = s.domain || new URL(s.url).hostname;
+      link.querySelector(".story-domain").textContent = s.domain;
     } else {
       link.hidden = true;
     }
@@ -833,6 +860,7 @@
   window.Earthwire = {
     dataBase,
     fetchJSON,
+    safeUrl,
     timeAgo,
     stories: () => state.stories,
     onStories: (fn) => storyListeners.push(fn),

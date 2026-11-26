@@ -131,7 +131,7 @@
     }
     if (!data) status.textContent = "Loading prices…";
     try {
-      data = await E.fetchJSON(base + "stocks.json?t=" + Date.now(), 15000);
+      data = validate(await E.fetchJSON(base + "stocks.json?t=" + Date.now(), 15000));
       loadedAt = Date.now();
       render();
     } catch (err) {
@@ -145,6 +145,33 @@
       }
       if (!view.hidden) retryTimer = setTimeout(loadStocks, 60000);
     }
+  }
+
+  // The saved file comes from outside this page, so keep only well-formed values.
+  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const str = (v, max) => (typeof v === "string" ? v.slice(0, max) : "");
+  function validate(raw) {
+    if (!raw || !Array.isArray(raw.stocks)) throw new Error("Unexpected stocks file");
+    const known = new Set(STOCKS.map((s) => s.symbol));
+    const stocks = raw.stocks.filter((s) => s && known.has(s.symbol)).map((s) => ({
+      symbol: s.symbol,
+      price: num(s.price),
+      change: num(s.change) ?? 0,
+      changePct: num(s.changePct) ?? 0,
+      currency: /^[A-Z]{3}$/.test(s.currency) ? s.currency : "USD",
+      marketTime: num(s.marketTime) ?? 0,
+      closes: (Array.isArray(s.closes) ? s.closes : [])
+        .filter((c) => Array.isArray(c) && num(c[0]) != null && num(c[1]) != null)
+        .slice(-400),
+      news: (Array.isArray(s.news) ? s.news : []).slice(0, 20).map((n) => ({
+        title: str(n && n.title, 300),
+        url: E.safeUrl(n && n.url),
+        domain: str(n && n.domain, 80),
+        time: num(n && n.time) ?? 0,
+      })).filter((n) => n.title && n.url),
+    }));
+    if (!stocks.length) throw new Error("No stocks in file");
+    return { at: num(raw.at) ?? 0, stocks };
   }
 
   // headlines for a stock: Yahoo Finance's (saved by the job) + matching map headlines
@@ -181,7 +208,7 @@
 
   function headlineItem(h) {
     const li = el("li");
-    const a = el("a", { href: h.url, target: "_blank", rel: "noopener noreferrer" }, h.title);
+    const a = el("a", { href: E.safeUrl(h.url) || "#", target: "_blank", rel: "noopener noreferrer" }, h.title);
     const meta = el("span", { class: "hl-meta" }, [h.domain, h.time ? E.timeAgo(new Date(h.time)) : ""].filter(Boolean).join(" · "));
     li.append(a, meta);
     return li;
@@ -221,9 +248,11 @@
       chg.setAttribute("aria-label", `${dir === "up" ? "Up" : dir === "down" ? "Down" : "Unchanged"} ${Math.abs(q.change).toFixed(2)} dollars, ${Math.abs(q.changePct).toFixed(2)} percent today`);
       priceBox.append(chg);
       head.append(priceBox);
-      if (q.closes && q.closes.length > 1) art.append(sparkline(q.closes, q.currency, stock.name));
-      const lo = Math.min(...q.closes.map((c) => c[1])), hi = Math.max(...q.closes.map((c) => c[1]));
-      art.append(el("p", { class: "range" }, `1-month range ${money(lo, q.currency)} – ${money(hi, q.currency)}`));
+      if (q.closes.length > 1) art.append(sparkline(q.closes, q.currency, stock.name));
+      if (q.closes.length) {
+        const ys = q.closes.map((c) => c[1]);
+        art.append(el("p", { class: "range" }, `1-month range ${money(Math.min(...ys), q.currency)} – ${money(Math.max(...ys), q.currency)}`));
+      }
     } else {
       art.append(el("p", { class: "no-price" }, data ? "Price unavailable right now." : "Waiting for prices…"));
     }

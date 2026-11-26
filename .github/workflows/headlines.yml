@@ -1,6 +1,14 @@
 # Every 30 minutes, fetch recent headlines and stock prices and save them to
 # the "data" branch as headlines.json and stocks.json. The site loads these
 # first so it fills instantly, then asks GDELT directly for newer headlines.
+#
+# Security notes:
+# - Runs only on a schedule, by hand, or on pushes to main. Never on pull
+#   requests, so outside contributors can't run code with this job's token.
+# - Third-party actions are pinned to exact commits (a moved tag can't
+#   swap in different code). Dependabot proposes updates.
+# - The token can only write repository contents, and only the steps that
+#   talk to GitHub get it; the steps that read outside news data don't.
 name: Update headlines
 
 on:
@@ -15,11 +23,7 @@ on:
       - scripts/fetch-stocks.mjs
       - scripts/publish-data.sh
 
-permissions:
-  contents: write
-
-env:
-  TOKEN: ${{ secrets.GITHUB_TOKEN }}
+permissions: {}
 
 concurrency:
   group: headlines
@@ -29,19 +33,25 @@ jobs:
   fetch:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
 
       # Start from the files already saved, so a source that fails this time
       # keeps its previous data instead of disappearing.
       - name: Get the previous files
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p out
-          if git fetch -q --depth=1 origin data; then
+          if git fetch -q --depth=1 "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" data; then
             git show FETCH_HEAD:headlines.json > out/headlines.json || rm -f out/headlines.json
             git show FETCH_HEAD:stocks.json > out/stocks.json || rm -f out/stocks.json
           fi
@@ -51,10 +61,14 @@ jobs:
 
       # Publish stock prices straight away; headlines can take several minutes.
       - name: Publish stocks
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash scripts/publish-data.sh
 
       - name: Fetch headlines
         run: node scripts/fetch-headlines.mjs out/headlines.json || echo "::warning::Headlines not updated"
 
       - name: Publish headlines
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash scripts/publish-data.sh

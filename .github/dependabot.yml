@@ -1,0 +1,8 @@
+# Opens a pull request when the pinned GitHub Actions in the workflows get
+# security or version updates, so the pins don't go stale.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
